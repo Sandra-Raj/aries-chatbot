@@ -1,0 +1,11 @@
+fastapi 
+uvicorn 
+langchain 
+langchain-ollama 
+langchain-community 
+sqlalchemy 
+mysql-connector-python 
+chromadb 
+pydantic
+
+uvicorn main:app --port 8001

@@ -1,7 +1,7 @@
 # main.py
 
 from fastapi import FastAPI
-from config import DB_CONFIG, AI_MODEL
+from config import DB_CONFIG, AI_MODEL, COMPANY_API_LINK
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
@@ -9,8 +9,6 @@ from langchain_ollama import ChatOllama
 from langchain_community.utilities import SQLDatabase
 
 template = """
-### MANDATORY RULE: A 'CLIENT' IS ALWAYS FOUND IN '0_debtors_master'. 
-### NEVER USE '0_temp_clients' UNLESS EXPLICITLY ASKED FOR TEMPORARY DATA.
 You are a Business Intelligence Analyst for Aries Marine. Based on the table schema below, 
 translate questions into accurate MySQL queries.
 Schema:
@@ -73,7 +71,19 @@ def clean_sql_output(text: str):
     # Removes markdown backticks and 'sql' labels that Ollama often adds
     return text.replace("```sql", "").replace("```", "").strip()
 
-llm = ChatOllama(model=AI_MODEL, temperature=0)
+llm = ChatOllama(
+    model=AI_MODEL,
+    base_url=COMPANY_API_LINK,
+    temperature=0
+)
+
+# try:
+#     response = llm.invoke("Hello, are you connected to the company server?")
+#     print("Connection Successful!")
+#     print(response.content)
+# except Exception as e:
+#     print(f"Connection Failed: {e}")
+
 sql_chain = (
     RunnablePassthrough.assign(schema=get_schema)
     | prompt

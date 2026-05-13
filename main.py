@@ -77,13 +77,6 @@ llm = ChatOllama(
     temperature=0
 )
 
-# try:
-#     response = llm.invoke("Hello, are you connected to the company server?")
-#     print("Connection Successful!")
-#     print(response.content)
-# except Exception as e:
-#     print(f"Connection Failed: {e}")
-
 sql_chain = (
     RunnablePassthrough.assign(schema=get_schema)
     | prompt

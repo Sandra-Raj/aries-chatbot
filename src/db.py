@@ -1,7 +1,21 @@
 import duckdb
 import os
 import streamlit as st
+from thefuzz import process
 
+def fuzzy_find_division(user_input):
+    """Corrects user input to match a valid division name."""
+    divisions, _, _, _ = get_filter_options()
+    # Find the closest match in the list of real divisions
+    match, score = process.extractOne(user_input, divisions)
+    return match if score > 70 else None
+
+def fuzzy_find_subdivision(user_input, division_name):
+    """Corrects user input to match a subdivision within a division."""
+    subdivisions = get_subdivisions(division_name)
+    match, score = process.extractOne(user_input, subdivisions)
+    return match if score > 70 else None
+    
 # Resolve paths
 current_dir = os.path.dirname(os.path.abspath(__file__))
 PARQUET_DIR = os.path.abspath(os.path.join(current_dir, "..", "data"))

@@ -110,84 +110,118 @@ st.session_state.active_filters = {
 # =========================================================
 # ROUTING LOGIC (Context Aware)
 # =========================================================
-INTENT_TEMPLATE = """You are a technical router for Aries Marine. Based on history and question, output a JSON object to call the correct function.
+# INTENT_TEMPLATE = """You are a technical router for Aries Marine. Based on history and question, output a JSON object to call the correct function.
 
-Chat history: {history}
+# Chat history: {history}
 
-FUNCTIONS:
-1. get_client_enquiries(enq_type, enq_status) - Use for ANY question about enquiries, status or type.
-    - enq_type: 'Project', 'Annual Contract', 'Shutdown', 'Callout', 'Tender', or 'None'
-    - enq_status: 'Open', 'Cancel', 'Lost', 'Transfer', 'Confirmed', 'BID Enquiry', or 'None'
-2. get_total_revenue() - Use for company revenue. DO NOT PASS ARGUMENTS.
-3. get_top_clients(division: string, limit: integer)
-4. get_inactive_clients(division: string)
+# FUNCTIONS:
+# 1. get_client_enquiries(enq_type, enq_status) - Use for ANY question about enquiries, status or type.
+#     - enq_type: 'Project', 'Annual Contract', 'Shutdown', 'Callout', 'Tender', or 'None'
+#     - enq_status: 'Open', 'Cancel', 'Lost', 'Transfer', 'Confirmed', 'BID Enquiry', or 'None'
 
-IMPORTANT:
-- Output ONLY valid JSON.
-- For get_total_revenue, the "arguments" field MUST be {{}}.
-- NEVER add extra keys like "type", or "status_open" to the arguments.
+# IMPORTANT:
+# - Output ONLY valid JSON.
+# - NEVER add extra keys like "type", or "status_open" to the arguments.
 
-For example:
+# For example:
 
-User Question: "give all open client enquiries under division I&M in the last 3 months"
-Response:
-    {{
-        "function": "get_client_enquiries",
-        "arguments": {{
-            "enq_status": "Open"
-        }}
-    }}
-User Question: {question}
-Response:
-"""
+# User Question: "give all open client enquiries under division I&M in the last 3 months"
+# Response:
+#     {{
+#         "function": "get_client_enquiries",
+#         "arguments": {{
+#             "enq_status": "Open"
+#         }}
+#     }}
+# User Question: {question}
+# Response:
+# """
 
 # =========================================================
 # UTILITIES
 # =========================================================
-def choose_function(user_query, chat_history):
-    history_str = "\n".join([f"{m.type}: {m.content}" for m in chat_history[-3:]])
+# def choose_function(user_query, chat_history):
+#     history_str = "\n".join([f"{m.type}: {m.content}" for m in chat_history[-3:]])
     
-    prompt = ChatPromptTemplate.from_template(INTENT_TEMPLATE)
-    chain = prompt | llm | StrOutputParser()
+#     prompt = ChatPromptTemplate.from_template(INTENT_TEMPLATE)
+#     chain = prompt | llm | StrOutputParser()
     
-    response = chain.invoke({"question": user_query, "history": history_str})
-    print(f"DEBUG - Raw AI: {response}")
+#     response = chain.invoke({"question": user_query, "history": history_str})
+#     print(f"DEBUG - Raw AI: {response}")
 
-    try:
-        # Step 1: If the model repeated the prompt examples, isolate the text after "Response:"
-        target_text = response
-        if "Response:" in response:
-            target_text = response.split("Response:")[-1]
+#     try:
+#         # Step 1: If the model repeated the prompt examples, isolate the text after "Response:"
+#         target_text = response
+#         if "Response:" in response:
+#             target_text = response.split("Response:")[-1]
 
-        # Step 2: Use greedy matching (.* instead of .*?) to capture the FULL JSON block.
-        # This ensures that internal braces like in "arguments": {} do not truncate the string.
-        match = re.search(r'(\{.*\})', target_text, re.DOTALL)
+#         # Step 2: Use greedy matching (.* instead of .*?) to capture the FULL JSON block.
+#         # This ensures that internal braces like in "arguments": {} do not truncate the string.
+#         match = re.search(r'(\{.*\})', target_text, re.DOTALL)
         
-        if not match:
-            return {"function": None, "arguments": {}}
+#         if not match:
+#             return {"function": None, "arguments": {}}
         
-        json_str = match.group(1)
+#         json_str = match.group(1)
         
-        # Step 3: Clean potential comments or markdown leftovers
-        json_str = re.sub(r'//.*', '', json_str)
-        json_str = json_str.replace("```json", "").replace("```", "").strip()
+#         # Step 3: Clean potential comments or markdown leftovers
+#         json_str = re.sub(r'//.*', '', json_str)
+#         json_str = json_str.replace("```json", "").replace("```", "").strip()
         
-        # Step 4: Fix potential trailing commas before closing braces/brackets
-        json_str = re.sub(r',\s*([\]}])', r'\1', json_str)
+#         # Step 4: Fix potential trailing commas before closing braces/brackets
+#         json_str = re.sub(r',\s*([\]}])', r'\1', json_str)
         
-        parsed = json.loads(json_str)
+#         parsed = json.loads(json_str)
         
-        # Safety check for required keys
-        if "function" not in parsed:
-            return {"function": None, "arguments": {}}
-        if "arguments" not in parsed:
-            parsed["arguments"] = {}
-        return parsed
+#         # Safety check for required keys
+#         if "function" not in parsed:
+#             return {"function": None, "arguments": {}}
+#         if "arguments" not in parsed:
+#             parsed["arguments"] = {}
+#         return parsed
             
-    except Exception as e:
-        print(f"Router Error during parsing: {e}")
-    return {"function": None, "arguments": {}}
+#     except Exception as e:
+#         print(f"Router Error during parsing: {e}")
+#     return {"function": None, "arguments": {}}
 
+def heuristic_router(query):
+    q = query.lower()
+    
+    # Intent: Revenue
+    if any(k in q for k in ["revenue", "money", "profit", "total", "invoice"]):
+        return {"function": "get_total_revenue", "arguments": {}}
+    
+    # Intent: Enquiries
+    if any(k in q for k in ["enquiry", "enquiries", "client", "clients", "lead", "status"]):
+        # Extract Status Entities
+        enq_status = None
+        statuses = {
+            "open": "Open", "cancel": "Cancel", "lost": "Lost", 
+            "transfer": "Transfer", "confirmed": "Confirmed", "bid": "BID Enquiry"
+        }
+        for key, val in statuses.items():
+            if key in q:
+                enq_status = val
+                break
+        
+        # Extract Type Entities
+        enq_type = None
+        types = {
+            "project": "Project", "annual": "Annual Contract", 
+            "shutdown": "Shutdown", "callout": "Callout", "tender": "Tender"
+        }
+        for key, val in types.items():
+            if key in q:
+                enq_type = val
+                break
+                
+        return {
+            "function": "get_client_enquiries", 
+            "arguments": {"enq_status": enq_status, "enq_type": enq_type}
+        }
+    
+    # Default fallback
+    return {"function": "get_client_enquiries", "arguments": {}}
 
 def generate_final_response(user_query, dataframe):
     template = """
@@ -243,17 +277,18 @@ if len(st.session_state.chat_history) > 0 and isinstance(st.session_state.chat_h
     last_query = st.session_state.chat_history[-1].content
     
     with st.chat_message("assistant"):
-        # STEP 1: Route immediately (Hidden spinner)
-        tool_data = choose_function(last_query, st.session_state.chat_history[:-1])
+        # STEP 1: ROUTE (Instant, no LLM used here)
+        tool_data = heuristic_router(last_query)
         res_df = None
-
+        
         if tool_data.get("function") in FUNCTION_MAP:
-            # STEP 2: Fetch Data
-            with st.spinner("Fetching from database..."):
+            # STEP 2: FETCH DATA (Spinner for DB only)
+            with st.spinner("Fetching data..."):
                 func = FUNCTION_MAP[tool_data["function"]]
                 res_df = func(**tool_data.get("arguments", {}))
             
             if res_df is not None and not res_df.empty:
+                # Fix Serial Numbers and Display Table Immediately
                 is_single = (res_df.shape == (1, 1))
                 print(res_df.shape)
                 if not is_single:
@@ -261,13 +296,11 @@ if len(st.session_state.chat_history) > 0 and isinstance(st.session_state.chat_h
                     st.dataframe(res_df)
                     print(res_df)
                     
-                    # STEP 3: Generate text summary (Secondary spinner)
+                else:
+                    # STEP 3: Generate text summary (Secondary spinner, ONLY LLM CALL)
                     with st.spinner("Summarizing results..."):
                         answer = generate_final_response(last_query, res_df)
                         st.markdown(answer)
-                else:
-                    answer = generate_final_response(last_query, res_df)
-                    st.markdown(answer)
             else:
                 answer = "No records found matching your filters."
                 st.markdown(answer)

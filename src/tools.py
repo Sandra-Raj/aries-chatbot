@@ -115,59 +115,7 @@ def get_client_enquiries(enq_type=None, enq_status=None):
 
     return db_conn.execute(query, params).fetchdf()
 
-def get_top_clients(division: str, limit: int = 10):
-    """Get top clients by profit/revenue for a division."""
-    query = """
-    SELECT
-        m.name AS client_name,
-        SUM((t.ov_amount * t.rate) - t.total_expense_aed) AS total_profit
-    FROM "debtor_trans" t
-    JOIN "debtors_master" m ON t.debtor_no = m.debtor_no
-    JOIN "dimensions" d ON t.dimension2_id = d.id
-    WHERE d.name = ?
-    GROUP BY t.debtor_no, m.name
-    ORDER BY total_profit DESC
-    LIMIT ?
-    """
-    return db_conn.execute(query, [division, limit]).fetchdf()
-
-def get_inactive_clients(division: str):
-    """Get inactive clients for a division based on last enquiry."""
-    query = """
-    SELECT
-        m.name AS client_name,
-        la.last_job_date,
-        la.last_enquiry_date
-    FROM (
-        SELECT
-            debtor_no,
-            division,
-            MAX(job_date) AS last_job_date,
-            MAX(enquiry_date) AS last_enquiry_date
-        FROM "client_activity_status"
-        GROUP BY debtor_no, division
-    ) la
-    JOIN "debtors_master" m ON la.debtor_no = m.debtor_no
-    JOIN "dimensions" d ON la.division = d.id
-    WHERE d.name = ?
-    """
-    return db_conn.execute(query, [division]).fetchdf()
-
-def get_total_revenue():
-    """Calculate total company revenue from allocations."""
-    query = """
-    SELECT
-        SUM(a.alloc_amount * a.bank_rate) AS total_revenue
-    FROM "cust_allocations" a
-    JOIN "debtor_trans" t ON a.trans_no_to = t.trans_no
-    WHERE a.trans_type_from = 12
-    """
-    return db_conn.execute(query).fetchdf()
-
 # Mapping for the Router
 FUNCTION_MAP = {
-    "get_top_clients": get_top_clients,
-    "get_inactive_clients": get_inactive_clients,
-    "get_total_revenue": get_total_revenue,
     "get_client_enquiries": get_client_enquiries
 }

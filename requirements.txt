@@ -9,6 +9,8 @@ mysql-connector-python
 streamlit
 dotenv
 duckdb
+thefuzz
+scikit-learn
 # chromadb 
 # pydantic
 

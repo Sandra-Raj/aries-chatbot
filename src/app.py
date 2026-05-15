@@ -290,11 +290,10 @@ if len(st.session_state.chat_history) > 0 and isinstance(st.session_state.chat_h
             if res_df is not None and not res_df.empty:
                 # Fix Serial Numbers and Display Table Immediately
                 is_single = (res_df.shape == (1, 1))
-                print(res_df.shape)
                 if not is_single:
                     res_df.index = range(1, len(res_df) + 1)
                     st.dataframe(res_df)
-                    print(res_df)
+                    answer = "Here's what I found based on your filters and question."
                     
                 else:
                     # STEP 3: Generate text summary (Secondary spinner, ONLY LLM CALL)
@@ -308,10 +307,10 @@ if len(st.session_state.chat_history) > 0 and isinstance(st.session_state.chat_h
             answer = "I'm not sure which function to use. Try being more specific."
             st.markdown(answer)
 
-            # Store in history with data attached
-            new_ai_msg = AIMessage(content=answer)
-            new_ai_msg.data = res_df
-            st.session_state.chat_history.append(new_ai_msg)
-            
-            # Final rerun to clear spinner and lock the view
-            st.rerun()
+        # Store in history with data attached
+        new_ai_msg = AIMessage(content=answer)
+        new_ai_msg.data = res_df
+        st.session_state.chat_history.append(new_ai_msg)
+        
+        # Final rerun to clear spinner and lock the view
+        st.rerun()

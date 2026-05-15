@@ -1,3 +1,4 @@
+#app.py
 import os
 import re
 import json
@@ -122,6 +123,9 @@ end_date = st.sidebar.date_input("End Date", value=None)
 if st.sidebar.button("Clear All Filters"):
     st.rerun()
 
+if "last_tool_call" not in st.session_state:
+    st.session_state.last_tool_call = None
+
 # Bundle filters into a session state or dictionary for the tools to use later
 st.session_state.active_filters = {
     "division": sel_division if sel_division != "None" else None,
@@ -132,44 +136,91 @@ st.session_state.active_filters = {
     "end_date": end_date
 }
 
-def heuristic_router(query):
-    q = query.lower()
+def vector_router(query):
+    query = query.lower()
     
-    # Intent: Revenue
-    if any(k in q for k in ["revenue", "money", "profit", "total", "invoice"]):
-        return {"function": "get_total_revenue", "arguments": {}}
+    # --- INTENT CLASSIFICATION (Meaning) ---
+    all_intents = []
+    intent_labels = []
     
-    # Intent: Enquiries
-    if any(k in q for k in ["enquiry", "enquiries", "client", "clients", "lead", "status"]):
-        # Extract Status Entities
-        enq_status = None
-        statuses = {
-            "open": "Open", "cancel": "Cancel", "lost": "Lost", 
-            "transfer": "Transfer", "confirmed": "Confirmed", "bid": "BID Enquiry"
-        }
-        for key, val in statuses.items():
-            if key in q:
-                enq_status = val
-                break
+    for label, phrases in INTENT_CLUSTERS.items():
+        all_intents.extend(phrases)
+        intent_labels.extend([label] * len(phrases))
+
+    # Vectorize phrases + user query
+    vectorizer = TfidfVectorizer().fit_transform(all_intents + [query])
+    vectors = vectorizer.toarray()
+    
+    # Compare query (last vector) against all intents
+    # cosine_similarity returns a score between 0 and 1
+    similarities = cosine_similarity([vectors[-1]], vectors[:-1])[0]
+    best_match_idx = similarities.argmax()
+    
+    # Set a threshold (e.g., 0.3) to avoid false positives
+    if similarities[best_match_idx] > 0.3:
+        intent = intent_labels[best_match_idx]
+    else:
+        intent = "get_client_enquiries" # Default fallback
+
+    # --- ENTITY EXTRACTION (Fuzzy Matching) ---
+    # We use fuzzy matching to fix typos in Statuses or Divisions
+    extracted_args = {}
+    
+    # --- 1. DIVISION EXTRACTION ---
+    matched_div = fuzzy_find_division(query)
+    if matched_div:
+        # Update the hidden filter
+        st.session_state.active_filters["division"] = matched_div
+        # Sync the Sidebar UI
+        st.session_state.sidebar_division = matched_div
         
-        # Extract Type Entities
-        enq_type = None
-        types = {
-            "project": "Project", "annual": "Annual Contract", 
-            "shutdown": "Shutdown", "callout": "Callout", "tender": "Tender"
-        }
-        for key, val in types.items():
-            if key in q:
-                enq_type = val
-                break
-                
-        return {
-            "function": "get_client_enquiries", 
-            "arguments": {"enq_status": enq_status, "enq_type": enq_type}
-        }
+        # --- 2. SUBDIVISION EXTRACTION (Only if Division is found) ---
+        matched_sub = fuzzy_find_subdivision(query, matched_div)
+        if matched_sub:
+            st.session_state.active_filters["subdivision"] = matched_sub
+            st.session_state.sidebar_subdivision = matched_sub
+
+    if intent == "get_client_enquiries":
+        # Fuzzy match the status
+        status_options = ["Open", "Cancel", "Lost", "Transfer", "Confirmed", "BID Enquiry"]
+        # Find best match in the query string
+        match, score = process.extractOne(query, status_options, scorer=fuzz.token_set_ratio)
+        if score > 70: # Confidence threshold
+            extracted_args["enq_status"] = match
+        # Fuzzy match the type
+        type_options = ["Project", "Annual Contract", "Shutdown", "Callout", "Tender"]
+        # Find best match in the query string
+        match, score = process.extractOne(query, type_options, scorer=fuzz.token_set_ratio)
+        if score > 70: # Confidence threshold
+            extracted_args["enq_type"] = match
     
-    # Default fallback
-    return {"function": "get_client_enquiries", "arguments": {}}
+    # --- 3. DATE EXTRACTION (New Logic) ---
+    start_date = None
+    today = datetime.today() # Default end date is today
+    match = re.search(r'(this|past|last)\s+(?:(\d+)\s+)?(day|week|month|year)s?', query)
+
+    if match:
+        count = int(match.group(2)) if match.group(2) else 1
+        unit = match.group(3)
+        if 'day' in unit:
+            start_date = today - timedelta(days=count)
+        elif 'week' in unit:
+            start_date = today - timedelta(weeks=count)
+        elif 'month' in unit:
+            start_date = today - timedelta(days=count * 30) # Approximation
+        elif 'year' in unit:
+            start_date = today - timedelta(days=count * 365) # Approximation
+
+
+    # If we found a date, add it to arguments
+    if start_date:
+        # This keeps Division, Country, etc. and only changes the dates
+        st.session_state.active_filters.update({
+            "start_date": start_date, 
+            "end_date": today
+        })
+            
+    return {"function": intent, "arguments": extracted_args}
 
 def generate_final_response(user_query, dataframe):
     template = """
@@ -226,7 +277,8 @@ if len(st.session_state.chat_history) > 0 and isinstance(st.session_state.chat_h
     
     with st.chat_message("assistant"):
         # STEP 1: ROUTE (Instant, no LLM used here)
-        tool_data = heuristic_router(last_query)
+        tool_data = vector_router(last_query)
+        st.session_state.last_tool_call = tool_data
         res_df = None
         
         if tool_data.get("function") in FUNCTION_MAP:
@@ -241,7 +293,7 @@ if len(st.session_state.chat_history) > 0 and isinstance(st.session_state.chat_h
                 if not is_single:
                     res_df.index = range(1, len(res_df) + 1)
                     st.dataframe(res_df)
-                    answer = "Here is the data you requested:"
+                    answer = "Here is the data you requested:"                    
                 else:
                     # STEP 3: Generate text summary (Secondary spinner, ONLY LLM CALL)
                     with st.spinner("Summarizing results..."):
